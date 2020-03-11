@@ -1,0 +1,145 @@
+service:
+    name: cf-dynamic-image-example
+  
+provider:
+  name: aws
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'ap-southeast-2'}
+  iamRoleStatements:
+    - Effect: Allow
+      Action: s3:PutObject
+      Resource: arn:aws:s3:::${self:custom.userParams.CDN_BUCKET}/*
+    - Effect: Allow
+      Action: s3:GetObject
+      Resource: arn:aws:s3:::${self:custom.userParams.PRIVATE_BUCKET}/*
+  apiGateway:
+    binaryMediaTypes:
+      - "*/*"
+
+custom:
+  userParams:
+    PRIVATE_BUCKET: shinemelb-private-bucket
+    CDN_BUCKET: shinemelb-cdn-bucket
+
+functions:
+  cdn-image:
+    runtime: nodejs12.x
+    handler: src/index.handler
+    memorySize: 3008
+    events:
+      - httpApi:
+          path: /image/{width}/{image+}
+          method: get
+    environment:
+      CDN_BUCKET_NAME: ${self:custom.userParams.CDN_BUCKET}
+      PRIVATE_BUCKET_NAME: ${self:custom.userParams.PRIVATE_BUCKET}
+
+resources:
+  Resources:
+    PrivateBucketBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:custom.userParams.PRIVATE_BUCKET}
+    CDNBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:custom.userParams.CDN_BUCKET}
+    CDNBucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        Bucket: !Ref CDNBucket
+        PolicyDocument:
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource:
+                Fn::Join:
+                  - /
+                  - - Fn::GetAtt:
+                        - CDNBucket
+                        - Arn
+                    - "*"
+              Principal:
+                CanonicalUser:
+                  Fn::GetAtt:
+                    - CDNOriginAccessIdentity
+                    - S3CanonicalUserId
+    CDNOriginAccessIdentity:
+      Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+      Properties:
+        CloudFrontOriginAccessIdentityConfig:
+          Comment: Origin Access Identity to access private bucket
+    CDNCloudFront:
+      Type: AWS::CloudFront::Distribution
+      DependsOn:
+        - CDNBucket
+      Properties:
+        DistributionConfig:
+          OriginGroups:
+            Items:
+              - Id: DynamicImageGroup
+                Members:
+                  Items:
+                    - OriginId: S3Origin
+                    - OriginId: APIGatewayOrigin
+                  Quantity: 2
+                FailoverCriteria:
+                  StatusCodes:
+                    Items:
+                      - 403
+                    Quantity: 1
+            Quantity: 1
+          Origins:
+            - Id: S3Origin
+              DomainName:
+                Fn::GetAtt:
+                  - CDNBucket
+                  - RegionalDomainName
+              S3OriginConfig:
+                OriginAccessIdentity:
+                  Fn::Join:
+                    - /
+                    - - origin-access-identity
+                      - cloudfront
+                      - !Ref CDNOriginAccessIdentity
+            - Id: APIGatewayOrigin
+              DomainName:
+                Fn::Join:
+                  [
+                    ".",
+                    [
+                      !Ref HttpApi,
+                      execute-api,
+                      !Ref AWS::Region,
+                      amazonaws.com,
+                    ],
+                  ]
+              CustomOriginConfig:
+                HTTPSPort: 443
+                OriginProtocolPolicy: https-only
+          DefaultCacheBehavior:
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            Compress: true
+            ForwardedValues:
+              QueryString: true
+              Cookies:
+                Forward: none
+              Headers:
+                - Access-Control-Request-Headers
+                - Access-Control-Request-Method
+                - Origin
+            TargetOriginId: DynamicImageGroup
+            ViewerProtocolPolicy: redirect-to-https
+          Enabled: true
+          HttpVersion: http2
+          PriceClass: PriceClass_All
+          ViewerCertificate:
+            CloudFrontDefaultCertificate: true
+  Outputs:
+    CDNDomainName:
+      Value:
+        Fn::GetAtt: CDNCloudFront.DomainName

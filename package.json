@@ -1,0 +1,19 @@
+{
+  "name": "dynamic-image-cf-example",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "deploy": "rm -rf node_modules/sharp && npm install --arch=x64 --platform=linux --target=12.13.1 sharp && npx serverless deploy"
+  },
+  "author": "kkesley",
+  "license": "ISC",
+  "devDependencies": {
+    "aws-sdk": "^2.637.0",
+    "serverless": "^1.66.0"
+  },
+  "dependencies": {
+    "sharp": "^0.25.1"
+  }
+}
