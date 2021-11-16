@@ -10,7 +10,7 @@
   "author": "kkesley",
   "license": "ISC",
   "devDependencies": {
-    "aws-sdk": "^2.637.0",
+    "aws-sdk": "^2.814.0",
     "serverless": "^1.66.0"
   },
   "dependencies": {
